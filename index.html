@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Gestion d'Inventaire</title>
+    <title>Gestion d'Inventaire Futuriste</title>
     <!-- Import Firebase -->
     <script src="https://www.gstatic.com/firebasejs/9.22.1/firebase-app-compat.js"></script>
     <script src="https://www.gstatic.com/firebasejs/9.22.1/firebase-firestore-compat.js"></script>
@@ -635,10 +635,19 @@ textarea {
                     <textarea id="product-details" name="details" placeholder="Détails supplémentaires sur le produit"></textarea>
                 </div>
                 
-                <div class="form-group">
-                    <label for="product-image">Image (URL)</label>
-                    <input type="url" id="product-image" name="image" placeholder="URL de l'image du produit">
-                </div>
+               <div class="form-group">
+    <label for="product-image">Image</label>
+    <input type="file" id="product-image" name="image" accept="image/*" style="display: none;">
+    <div style="display: flex; gap: 10px; align-items: center;">
+        <button type="button" id="upload-image-btn" class="btn btn-secondary" style="padding: 10px 15px;">
+            image
+        </button>
+        <span id="image-filename" style="color: #666; font-size: 14px;">Aucune image sélectionnée</span>
+    </div>
+    <div id="image-preview" style="margin-top: 10px; display: none;">
+        <img id="preview-img" style="max-width: 200px; max-height: 150px; border-radius: 10px; border: 2px solid var(--primary-color);">
+    </div>
+</div>
                 
                 <div class="actions">
                     <button type="button" id="reset-btn" class="btn btn-secondary">Effacer</button>
@@ -706,323 +715,384 @@ textarea {
     </div>
 
     <script>
-        // Configuration Firebase
-        const firebaseConfig = {
-            apiKey: "AIzaSyDeGpCrAZI1zGBL27bTgM09dWpqOZJg31E",
-            authDomain: "djibril-88bad.firebaseapp.com",
-            projectId: "djibril-88bad",
-            storageBucket: "djibril-88bad.firebasestorage.app",
-            messagingSenderId: "446779030788",
-            appId: "1:446779030788:web:8b9a8d45afe3314cf9a451",
-            measurementId: "G-LE0J3ZMB6Q"
-        };
+// Configuration Firebase
+const firebaseConfig = {
+    apiKey: "AIzaSyDeGpCrAZI1zGBL27bTgM09dWpqOZJg31E",
+    authDomain: "djibril-88bad.firebaseapp.com",
+    projectId: "djibril-88bad",
+    storageBucket: "djibril-88bad.firebasestorage.app",
+    messagingSenderId: "446779030788",
+    appId: "1:446779030788:web:8b9a8d45afe3314cf9a451",
+    measurementId: "G-LE0J3ZMB6Q"
+};
 
-        // Initialisation Firebase
-        firebase.initializeApp(firebaseConfig);
-        const db = firebase.firestore();
+// Initialisation Firebase
+firebase.initializeApp(firebaseConfig);
+const db = firebase.firestore();
+
+// Références aux éléments DOM
+const productForm = document.getElementById('product-form');
+const productsContainer = document.getElementById('products-container');
+const searchInput = document.getElementById('search-input');
+const categoryFilter = document.getElementById('category-filter');
+const categoriesDatalist = document.getElementById('categories');
+const resetBtn = document.getElementById('reset-btn');
+const productModal = document.getElementById('product-modal');
+const closeModalBtn = document.querySelector('.close-modal');
+const printBtn = document.getElementById('print-btn');
+const downloadPdfBtn = document.getElementById('download-pdf-btn');
+const deleteProductBtn = document.getElementById('delete-product-btn');
+
+// Références pour l'upload d'image
+const imageInput = document.getElementById('product-image');
+const uploadImageBtn = document.getElementById('upload-image-btn');
+const imageFilename = document.getElementById('image-filename');
+const imagePreview = document.getElementById('image-preview');
+const previewImg = document.getElementById('preview-img');
+
+// Variables globales
+let products = [];
+let categories = [];
+let selectedProductId = null;
+
+// Gestion de l'upload d'image
+uploadImageBtn.addEventListener('click', () => {
+    imageInput.click();
+});
+
+imageInput.addEventListener('change', function(e) {
+    const file = e.target.files[0];
+    if (file) {
+        imageFilename.textContent = file.name;
         
-        // Références aux éléments DOM
-        const productForm = document.getElementById('product-form');
-        const productsContainer = document.getElementById('products-container');
-        const searchInput = document.getElementById('search-input');
-        const categoryFilter = document.getElementById('category-filter');
-        const categoriesDatalist = document.getElementById('categories');
-        const resetBtn = document.getElementById('reset-btn');
-        const productModal = document.getElementById('product-modal');
-        const closeModalBtn = document.querySelector('.close-modal');
-        const printBtn = document.getElementById('print-btn');
-        const downloadPdfBtn = document.getElementById('download-pdf-btn');
-        const deleteProductBtn = document.getElementById('delete-product-btn');
+        // Aperçu de l'image
+        const reader = new FileReader();
+        reader.onload = function(e) {
+            previewImg.src = e.target.result;
+            imagePreview.style.display = 'block';
+        }
+        reader.readAsDataURL(file);
+    } else {
+        imageFilename.textContent = 'Aucune image sélectionnée';
+        imagePreview.style.display = 'none';
+    }
+});
+
+// Chargement des produits au démarrage
+document.addEventListener('DOMContentLoaded', function() {
+    loadProducts();
+    
+    // Écouteurs d'événements
+    productForm.addEventListener('submit', saveProduct);
+    searchInput.addEventListener('input', filterProducts);
+    categoryFilter.addEventListener('change', filterProducts);
+    resetBtn.addEventListener('click', resetForm);
+    closeModalBtn.addEventListener('click', closeModal);
+    printBtn.addEventListener('click', printProduct);
+    downloadPdfBtn.addEventListener('click', downloadProductPdf);
+    deleteProductBtn.addEventListener('click', deleteProduct);
+    
+    // Fermer la modal en cliquant à l'extérieur
+    window.addEventListener('click', function(event) {
+        if (event.target === productModal) {
+            closeModal();
+        }
+    });
+});
+
+// Charger les produits depuis Firestore
+function loadProducts() {
+    db.collection('products').orderBy('name').onSnapshot(snapshot => {
+        products = [];
+        categories = [];
         
-        // Variables globales
-        let products = [];
-        let categories = [];
-        let selectedProductId = null;
-        
-        // Chargement des produits au démarrage
-        document.addEventListener('DOMContentLoaded', function() {
-            loadProducts();
+        snapshot.forEach(doc => {
+            const product = {
+                id: doc.id,
+                ...doc.data()
+            };
+            products.push(product);
             
-            // Écouteurs d'événements
-            productForm.addEventListener('submit', saveProduct);
-            searchInput.addEventListener('input', filterProducts);
-            categoryFilter.addEventListener('change', filterProducts);
-            resetBtn.addEventListener('click', resetForm);
-            closeModalBtn.addEventListener('click', closeModal);
-            printBtn.addEventListener('click', printProduct);
-            downloadPdfBtn.addEventListener('click', downloadProductPdf);
-            deleteProductBtn.addEventListener('click', deleteProduct);
-            
-            // Fermer la modal en cliquant à l'extérieur
-            window.addEventListener('click', function(event) {
-                if (event.target === productModal) {
-                    closeModal();
-                }
-            });
+            // Ajouter la catégorie à la liste si elle n'existe pas déjà
+            if (product.category && !categories.includes(product.category)) {
+                categories.push(product.category);
+            }
         });
         
-        // Charger les produits depuis Firestore
-        function loadProducts() {
-            db.collection('products').orderBy('name').onSnapshot(snapshot => {
-                products = [];
-                categories = [];
-                
-                snapshot.forEach(doc => {
-                    const product = {
-                        id: doc.id,
-                        ...doc.data()
-                    };
-                    products.push(product);
-                    
-                    // Ajouter la catégorie à la liste si elle n'existe pas déjà
-                    if (product.category && !categories.includes(product.category)) {
-                        categories.push(product.category);
-                    }
-                });
-                
-                updateCategories();
-                displayProducts(products);
+        updateCategories();
+        displayProducts(products);
+    });
+}
+
+// Mettre à jour les listes de catégories
+function updateCategories() {
+    // Vider les listes
+    categoriesDatalist.innerHTML = '';
+    categoryFilter.innerHTML = '<option value="">Toutes les catégories</option>';
+    
+    // Ajouter les catégories
+    categories.forEach(category => {
+        // Pour la datalist
+        const option1 = document.createElement('option');
+        option1.value = category;
+        categoriesDatalist.appendChild(option1);
+        
+        // Pour le filtre
+        const option2 = document.createElement('option');
+        option2.value = category;
+        option2.textContent = category;
+        categoryFilter.appendChild(option2);
+    });
+}
+
+// Afficher les produits
+function displayProducts(productsToDisplay) {
+    productsContainer.innerHTML = '';
+    
+    if (productsToDisplay.length === 0) {
+        productsContainer.innerHTML = '<div class="no-products">Aucun produit trouvé</div>';
+        return;
+    }
+    
+    productsToDisplay.forEach(product => {
+        const productCard = document.createElement('div');
+        productCard.className = 'product-card';
+        productCard.setAttribute('data-id', product.id);
+        
+        productCard.innerHTML = `
+            ${product.image ? `<img src="${product.image}" alt="${product.name}" class="product-image">` : 
+              '<div class="product-image" style="background: linear-gradient(135deg, var(--primary-color), var(--accent-color)); display: flex; align-items: center; justify-content: center; color: white; font-weight: bold;">Aucune image</div>'}
+            <div class="product-info">
+                <div class="product-name">${product.name || 'Nom non spécifié'}</div>
+                ${product.category ? `<span class="product-category">${product.category}</span>` : ''}
+                ${product.stock !== undefined ? `<div class="product-stock">Stock: ${product.stock}</div>` : ''}
+                ${product.model ? `<div class="product-model">Modèle: ${product.model}</div>` : ''}
+            </div>
+        `;
+        
+        productCard.addEventListener('click', () => openProductModal(product.id));
+        productsContainer.appendChild(productCard);
+    });
+}
+
+// CORRECTION : Fonction saveProduct simplifiée et fonctionnelle
+async function saveProduct(e) {
+    e.preventDefault();
+    console.log('Tentative d\'enregistrement...');
+    
+    // Récupérer les valeurs du formulaire
+    const name = document.getElementById('product-name').value;
+    const stock = parseInt(document.getElementById('product-stock').value) || 0;
+    const category = document.getElementById('product-category').value;
+    const model = document.getElementById('product-model').value;
+    const details = document.getElementById('product-details').value;
+    const imageFile = imageInput.files[0];
+    
+    // Validation basique
+    if (!name) {
+        alert('Veuillez saisir un nom de produit');
+        return;
+    }
+    
+    let imageUrl = '';
+    
+    // Conversion image en base64 si une image est sélectionnée
+    if (imageFile) {
+        try {
+            imageUrl = await new Promise((resolve, reject) => {
+                const reader = new FileReader();
+                reader.onload = function(e) {
+                    resolve(e.target.result);
+                };
+                reader.onerror = function(error) {
+                    reject(error);
+                };
+                reader.readAsDataURL(imageFile);
             });
+        } catch (error) {
+            console.error('Erreur conversion image:', error);
+            alert('Erreur avec l\'image, le produit sera enregistré sans image.');
         }
+    }
+    
+    const product = {
+        name: name.trim(),
+        stock: stock,
+        category: category.trim(),
+        model: model.trim(),
+        details: details.trim(),
+        image: imageUrl,
+        dateAdded: new Date()
+    };
+    
+    // Sauvegarder dans Firebase
+    try {
+        await db.collection('products').add(product);
+        console.log('Produit ajouté avec succès');
+        resetForm();
+        alert('Produit enregistré avec succès !');
+    } catch (error) {
+        console.error('Erreur Firebase:', error);
+        alert('Erreur lors de l\'enregistrement: ' + error.message);
+    }
+}
+
+// Filtrer les produits
+function filterProducts() {
+    const searchTerm = searchInput.value.toLowerCase();
+    const selectedCategory = categoryFilter.value;
+    
+    const filteredProducts = products.filter(product => {
+        const matchesSearch = !searchTerm || 
+            (product.name && product.name.toLowerCase().includes(searchTerm)) ||
+            (product.model && product.model.toLowerCase().includes(searchTerm)) ||
+            (product.details && product.details.toLowerCase().includes(searchTerm));
         
-        // Mettre à jour les listes de catégories
-        function updateCategories() {
-            // Vider les listes
-            categoriesDatalist.innerHTML = '';
-            categoryFilter.innerHTML = '<option value="">Toutes les catégories</option>';
-            
-            // Ajouter les catégories
-            categories.forEach(category => {
-                // Pour la datalist
-                const option1 = document.createElement('option');
-                option1.value = category;
-                categoriesDatalist.appendChild(option1);
-                
-                // Pour le filtre
-                const option2 = document.createElement('option');
-                option2.value = category;
-                option2.textContent = category;
-                categoryFilter.appendChild(option2);
+        const matchesCategory = !selectedCategory || product.category === selectedCategory;
+        
+        return matchesSearch && matchesCategory;
+    });
+    
+    displayProducts(filteredProducts);
+}
+
+// Réinitialiser le formulaire
+function resetForm() {
+    productForm.reset();
+    imageInput.value = '';
+    imageFilename.textContent = 'Aucune image sélectionnée';
+    imagePreview.style.display = 'none';
+}
+
+// Ouvrir la modal avec les détails du produit
+function openProductModal(productId) {
+    const product = products.find(p => p.id === productId);
+    if (!product) return;
+    
+    selectedProductId = productId;
+    
+    // Mettre à jour le contenu de la modal
+    document.getElementById('modal-product-name').textContent = product.name || 'Nom non spécifié';
+    document.getElementById('modal-product-stock').textContent = product.stock !== undefined ? product.stock : 'Non spécifié';
+    document.getElementById('modal-product-category').textContent = product.category || 'Non spécifié';
+    document.getElementById('modal-product-model').textContent = product.model || 'Non spécifié';
+    document.getElementById('modal-product-details').textContent = product.details || 'Aucun détail';
+    
+    const modalImage = document.getElementById('modal-product-image');
+    if (product.image) {
+        modalImage.src = product.image;
+        modalImage.style.display = 'block';
+    } else {
+        modalImage.style.display = 'none';
+    }
+    
+    // Afficher la modal
+    productModal.style.display = 'flex';
+}
+
+// Fermer la modal
+function closeModal() {
+    productModal.style.display = 'none';
+    selectedProductId = null;
+}
+
+// Imprimer les détails du produit
+function printProduct() {
+    const product = products.find(p => p.id === selectedProductId);
+    if (!product) return;
+    
+    const printWindow = window.open('', '_blank');
+    printWindow.document.write(`
+        <html>
+            <head>
+                <title>Détails du produit: ${product.name}</title>
+                <style>
+                    body { font-family: Arial, sans-serif; margin: 20px; }
+                    .logo { max-height: 80px; margin-bottom: 20px; }
+                    h1 { color: #2c3e50; margin-bottom: 20px; }
+                    .product-info { margin-bottom: 20px; }
+                    .detail { margin-bottom: 10px; }
+                    .label { font-weight: bold; }
+                    .image { max-width: 300px; margin-top: 20px; }
+                </style>
+            </head>
+            <body>
+                <img src="https://i.postimg.cc/Ss21d9Rp/LOGO.png" alt="Logo" class="logo">
+                <h1>Détails du produit</h1>
+                <div class="product-info">
+                    <div class="detail"><span class="label">Nom:</span> ${product.name || 'Non spécifié'}</div>
+                    <div class="detail"><span class="label">Stock:</span> ${product.stock !== undefined ? product.stock : 'Non spécifié'}</div>
+                    <div class="detail"><span class="label">Catégorie:</span> ${product.category || 'Non spécifié'}</div>
+                    <div class="detail"><span class="label">Modèle:</span> ${product.model || 'Non spécifié'}</div>
+                    <div class="detail"><span class="label">Détails:</span> ${product.details || 'Aucun détail'}</div>
+                </div>
+                ${product.image ? `<img src="${product.image}" alt="${product.name}" class="image">` : ''}
+            </body>
+        </html>
+    `);
+    printWindow.document.close();
+    printWindow.print();
+}
+
+// Télécharger les détails du produit en PDF
+function downloadProductPdf() {
+    const product = products.find(p => p.id === selectedProductId);
+    if (!product) return;
+    
+    const { jsPDF } = window.jspdf;
+    const doc = new jsPDF();
+    
+    // Ajouter le logo
+    doc.addImage('https://i.postimg.cc/Ss21d9Rp/LOGO.png', 'PNG', 10, 10, 40, 20);
+    
+    // Titre
+    doc.setFontSize(20);
+    doc.setTextColor(44, 62, 80);
+    doc.text('Détails du produit', 105, 30, { align: 'center' });
+    
+    // Informations du produit
+    doc.setFontSize(12);
+    doc.setTextColor(0, 0, 0);
+    
+    let yPosition = 50;
+    
+    doc.text(`Nom: ${product.name || 'Non spécifié'}`, 20, yPosition);
+    yPosition += 10;
+    
+    doc.text(`Stock: ${product.stock !== undefined ? product.stock : 'Non spécifié'}`, 20, yPosition);
+    yPosition += 10;
+    
+    doc.text(`Catégorie: ${product.category || 'Non spécifié'}`, 20, yPosition);
+    yPosition += 10;
+    
+    doc.text(`Modèle: ${product.model || 'Non spécifié'}`, 20, yPosition);
+    yPosition += 10;
+    
+    // Détails
+    const details = product.details || 'Aucun détail';
+    const splitDetails = doc.splitTextToSize(`Détails: ${details}`, 170);
+    doc.text(splitDetails, 20, yPosition);
+    
+    // Sauvegarder le PDF
+    doc.save(`produit_${product.name || 'sans_nom'}.pdf`);
+}
+
+// Supprimer un produit
+function deleteProduct() {
+    if (!selectedProductId) return;
+    
+    if (confirm('Êtes-vous sûr de vouloir supprimer ce produit ?')) {
+        db.collection('products').doc(selectedProductId).delete()
+            .then(() => {
+                console.log('Produit supprimé avec succès');
+                closeModal();
+            })
+            .catch(error => {
+                console.error('Erreur lors de la suppression du produit:', error);
+                alert('Erreur lors de la suppression: ' + error.message);
             });
-        }
-        
-        // Afficher les produits
-        function displayProducts(productsToDisplay) {
-            productsContainer.innerHTML = '';
-            
-            if (productsToDisplay.length === 0) {
-                productsContainer.innerHTML = '<div class="no-products">Aucun produit trouvé</div>';
-                return;
-            }
-            
-            productsToDisplay.forEach(product => {
-                const productCard = document.createElement('div');
-                productCard.className = 'product-card';
-                productCard.setAttribute('data-id', product.id);
-                
-                productCard.innerHTML = `
-                    ${product.image ? `<img src="${product.image}" alt="${product.name}" class="product-image">` : 
-                      '<div class="product-image" style="background: linear-gradient(135deg, var(--primary-color), var(--accent-color)); display: flex; align-items: center; justify-content: center; color: white; font-weight: bold;">Aucune image</div>'}
-                    <div class="product-info">
-                        <div class="product-name">${product.name || 'Nom non spécifié'}</div>
-                        ${product.category ? `<span class="product-category">${product.category}</span>` : ''}
-                        ${product.stock !== undefined ? `<div class="product-stock">Stock: ${product.stock}</div>` : ''}
-                        ${product.model ? `<div class="product-model">Modèle: ${product.model}</div>` : ''}
-                    </div>
-                `;
-                
-                productCard.addEventListener('click', () => openProductModal(product.id));
-                productsContainer.appendChild(productCard);
-            });
-        }
-        
-        // Sauvegarder un produit
-        function saveProduct(e) {
-            e.preventDefault();
-            
-            const formData = new FormData(productForm);
-            const product = {
-                name: formData.get('name') || '',
-                stock: formData.get('stock') ? parseInt(formData.get('stock')) : 0,
-                category: formData.get('category') || '',
-                model: formData.get('model') || '',
-                details: formData.get('details') || '',
-                image: formData.get('image') || ''
-            };
-            
-            // Ajouter le produit à Firestore
-            db.collection('products').add(product)
-                .then(() => {
-                    console.log('Produit ajouté avec succès');
-                    productForm.reset();
-                })
-                .catch(error => {
-                    console.error('Erreur lors de l\'ajout du produit:', error);
-                });
-        }
-        
-        // Filtrer les produits
-        function filterProducts() {
-            const searchTerm = searchInput.value.toLowerCase();
-            const selectedCategory = categoryFilter.value;
-            
-            const filteredProducts = products.filter(product => {
-                const matchesSearch = !searchTerm || 
-                    (product.name && product.name.toLowerCase().includes(searchTerm)) ||
-                    (product.model && product.model.toLowerCase().includes(searchTerm)) ||
-                    (product.details && product.details.toLowerCase().includes(searchTerm));
-                
-                const matchesCategory = !selectedCategory || product.category === selectedCategory;
-                
-                return matchesSearch && matchesCategory;
-            });
-            
-            displayProducts(filteredProducts);
-        }
-        
-        // Réinitialiser le formulaire
-        function resetForm() {
-            productForm.reset();
-        }
-        
-        // Ouvrir la modal avec les détails du produit
-        function openProductModal(productId) {
-            const product = products.find(p => p.id === productId);
-            if (!product) return;
-            
-            selectedProductId = productId;
-            
-            // Mettre à jour le contenu de la modal
-            document.getElementById('modal-product-name').textContent = product.name || 'Nom non spécifié';
-            document.getElementById('modal-product-stock').textContent = product.stock !== undefined ? product.stock : 'Non spécifié';
-            document.getElementById('modal-product-category').textContent = product.category || 'Non spécifié';
-            document.getElementById('modal-product-model').textContent = product.model || 'Non spécifié';
-            document.getElementById('modal-product-details').textContent = product.details || 'Aucun détail';
-            
-            const modalImage = document.getElementById('modal-product-image');
-            if (product.image) {
-                modalImage.src = product.image;
-                modalImage.style.display = 'block';
-            } else {
-                modalImage.style.display = 'none';
-            }
-            
-            // Afficher la modal
-            productModal.style.display = 'flex';
-        }
-        
-        // Fermer la modal
-        function closeModal() {
-            productModal.style.display = 'none';
-            selectedProductId = null;
-        }
-        
-        // Imprimer les détails du produit
-        function printProduct() {
-            const product = products.find(p => p.id === selectedProductId);
-            if (!product) return;
-            
-            const printWindow = window.open('', '_blank');
-            printWindow.document.write(`
-                <html>
-                    <head>
-                        <title>Détails du produit: ${product.name}</title>
-                        <style>
-                            body { font-family: Arial, sans-serif; margin: 20px; }
-                            .logo { max-height: 80px; margin-bottom: 20px; }
-                            h1 { color: #2c3e50; margin-bottom: 20px; }
-                            .product-info { margin-bottom: 20px; }
-                            .detail { margin-bottom: 10px; }
-                            .label { font-weight: bold; }
-                            .image { max-width: 300px; margin-top: 20px; }
-                        </style>
-                    </head>
-                    <body>
-                        <img src="https://i.postimg.cc/Ss21d9Rp/LOGO.png" alt="Logo" class="logo">
-                        <h1>Détails du produit</h1>
-                        <div class="product-info">
-                            <div class="detail"><span class="label">Nom:</span> ${product.name || 'Non spécifié'}</div>
-                            <div class="detail"><span class="label">Stock:</span> ${product.stock !== undefined ? product.stock : 'Non spécifié'}</div>
-                            <div class="detail"><span class="label">Catégorie:</span> ${product.category || 'Non spécifié'}</div>
-                            <div class="detail"><span class="label">Modèle:</span> ${product.model || 'Non spécifié'}</div>
-                            <div class="detail"><span class="label">Détails:</span> ${product.details || 'Aucun détail'}</div>
-                        </div>
-                        ${product.image ? `<img src="${product.image}" alt="${product.name}" class="image">` : ''}
-                    </body>
-                </html>
-            `);
-            printWindow.document.close();
-            printWindow.print();
-        }
-        
-        // Télécharger les détails du produit en PDF
-        function downloadProductPdf() {
-            const product = products.find(p => p.id === selectedProductId);
-            if (!product) return;
-            
-            const { jsPDF } = window.jspdf;
-            const doc = new jsPDF();
-            
-            // Ajouter le logo (en utilisant une image par défaut si le logo ne se charge pas)
-            doc.addImage('https://i.postimg.cc/Ss21d9Rp/LOGO.png', 'PNG', 10, 10, 40, 20);
-            
-            // Titre
-            doc.setFontSize(20);
-            doc.setTextColor(44, 62, 80);
-            doc.text('Détails du produit', 105, 30, { align: 'center' });
-            
-            // Informations du produit
-            doc.setFontSize(12);
-            doc.setTextColor(0, 0, 0);
-            
-            let yPosition = 50;
-            
-            doc.text(`Nom: ${product.name || 'Non spécifié'}`, 20, yPosition);
-            yPosition += 10;
-            
-            doc.text(`Stock: ${product.stock !== undefined ? product.stock : 'Non spécifié'}`, 20, yPosition);
-            yPosition += 10;
-            
-            doc.text(`Catégorie: ${product.category || 'Non spécifié'}`, 20, yPosition);
-            yPosition += 10;
-            
-            doc.text(`Modèle: ${product.model || 'Non spécifié'}`, 20, yPosition);
-            yPosition += 10;
-            
-            // Détails (avec gestion du texte long)
-            const details = product.details || 'Aucun détail';
-            const splitDetails = doc.splitTextToSize(`Détails: ${details}`, 170);
-            doc.text(splitDetails, 20, yPosition);
-            yPosition += splitDetails.length * 7;
-            
-            // Image du produit (si disponible)
-            if (product.image) {
-                try {
-                    doc.addImage(product.image, 'JPEG', 20, yPosition + 10, 50, 50);
-                } catch (e) {
-                    console.error('Erreur lors du chargement de l\'image:', e);
-                }
-            }
-            
-            // Sauvegarder le PDF
-            doc.save(`produit_${product.name || 'sans_nom'}.pdf`);
-        }
-        
-        // Supprimer un produit
-        function deleteProduct() {
-            if (!selectedProductId) return;
-            
-            if (confirm('Êtes-vous sûr de vouloir supprimer ce produit ?')) {
-                db.collection('products').doc(selectedProductId).delete()
-                    .then(() => {
-                        console.log('Produit supprimé avec succès');
-                        closeModal();
-                    })
-                    .catch(error => {
-                        console.error('Erreur lors de la suppression du produit:', error);
-                    });
-            }
-        }
+    }
+}
     </script>
 </body>
 </html>
